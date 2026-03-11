@@ -2,14 +2,21 @@
 image_gatherer.py — Fetch logos and illustrations for detected technologies.
 
 Strategy (in priority order):
-  1. Clearbit Logo API  — https://logo.clearbit.com/{domain}
-  2. Wikimedia Commons API — free tech SVG/PNG logos
-  3. Simple coloured placeholder image (always succeeds)
+  1. Devicon CDN      — https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/…
+  2. SimpleIcons CDN  — https://cdn.simpleicons.org/{slug}/FFFFFF (white SVG → PNG)
+  3. Clearbit Logo API — https://logo.clearbit.com/{domain}
+  4. Simple coloured placeholder image (always succeeds)
+
+Downloads are performed in parallel for faster Step-5 execution.
 """
 
 from __future__ import annotations
 
+import io
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 import requests
 from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
@@ -17,10 +24,157 @@ from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
 from techstack.utils import find_system_font, slugify
 
 # ---------------------------------------------------------------------------
-# Domain map: technology label → Clearbit domain
+# Devicon slug map — maps technology label → devicon icon slug
+# ---------------------------------------------------------------------------
+DEVICON_SLUGS: dict[str, str] = {
+    # Languages
+    "Python": "python",
+    "JavaScript": "javascript",
+    "TypeScript": "typescript",
+    "Go": "go",
+    "Rust": "rust",
+    "Java": "java",
+    "Kotlin": "kotlin",
+    "Ruby": "ruby",
+    "PHP": "php",
+    "C#": "csharp",
+    "C++": "cplusplus",
+    "C": "c",
+    "Swift": "swift",
+    "Scala": "scala",
+    "Elixir": "elixir",
+    "Haskell": "haskell",
+    "Dart": "dart",
+    "Lua": "lua",
+    "R": "r",
+    "Shell": "bash",
+    "PowerShell": "powershell",
+    # Frameworks / Libraries
+    "FastAPI": "fastapi",
+    "Flask": "flask",
+    "Django": "django",
+    "Express.js": "express",
+    "NestJS": "nestjs",
+    "Next.js": "nextjs",
+    "Nuxt.js": "nuxtjs",
+    "Vue.js": "vuejs",
+    "React": "react",
+    "Angular": "angularjs",
+    "Svelte": "svelte",
+    "SvelteKit / Svelte": "svelte",
+    "Spring Boot": "spring",
+    "Ruby on Rails": "rails",
+    "Laravel": "laravel",
+    "Gin (Go)": "go",
+    "Echo (Go)": "go",
+    "Actix-web (Rust)": "rust",
+    "Axum / Tokio (Rust)": "rust",
+    "Phoenix (Elixir)": "elixir",
+    # Databases
+    "PostgreSQL": "postgresql",
+    "MySQL": "mysql",
+    "MySQL / MariaDB": "mysql",
+    "MariaDB": "mariadb",
+    "MongoDB": "mongodb",
+    "Redis": "redis",
+    "SQLite": "sqlite",
+    "Elasticsearch": "elasticsearch",
+    "Cassandra": "cassandra",
+    "CouchDB": "couchdb",
+    "Firebase / Firestore": "firebase",
+    "Supabase": "supabase",
+    "Neo4j": "neo4j",
+    # ORMs / Data tools
+    "Prisma ORM": "prisma",
+    "SQLAlchemy / Alembic": "sqlalchemy",
+    "Sequelize ORM": "sequelize",
+    "Django ORM": "django",
+    # Auth
+    "GitHub Actions": "github",
+    "Auth0": "auth0",
+    # CI/CD
+    "CircleCI": "circleci",
+    "Jenkins": "jenkins",
+    "GitLab CI": "gitlab",
+    "Travis CI": "travis",
+    "Azure Pipelines": "azure",
+    # Containers / Orchestration
+    "Docker": "docker",
+    "Docker Compose": "docker",
+    "Kubernetes": "kubernetes",
+    "Helm": "helm",
+    # IaC / Cloud tools
+    "Terraform": "terraform",
+    "Ansible": "ansible",
+    "Pulumi": "pulumi",
+    # Cloud
+    "AWS": "amazonwebservices",
+    "Google Cloud": "googlecloud",
+    "Azure": "azure",
+    "DigitalOcean": "digitalocean",
+    "Cloudflare": "cloudflare",
+    "Vercel": "vercel",
+    "Netlify": "netlify",
+    "Heroku": "heroku",
+    # Other
+    "GraphQL": "graphql",
+    "Apache Kafka": "apachekafka",
+    "Nginx": "nginx",
+    "Apache": "apache",
+    "Linux": "linux",
+    "Ubuntu": "ubuntu",
+    "Debian": "debian",
+    "Git": "git",
+    "GitHub": "github",
+    "GitLab": "gitlab",
+    "Bitbucket": "bitbucket",
+    "Node.js / npm": "nodejs",
+    "Node.js / Yarn": "yarn",
+    "Node.js / pnpm": "pnpm",
+    "Python / pip": "python",
+    "Python / pipenv": "python",
+    "Python / Poetry or PEP-517": "python",
+    "Rust / Cargo": "rust",
+    "Go Modules": "go",
+    "Java / Maven": "maven",
+    "Java / Gradle": "gradle",
+    "Kotlin / Gradle": "gradle",
+    "Ruby / Bundler": "ruby",
+    "PHP / Composer": "composer",
+    "Dart / Flutter": "flutter",
+    "Elixir / Mix": "elixir",
+}
+
+# ---------------------------------------------------------------------------
+# SimpleIcons slug map — fallback for items not in Devicon
+# ---------------------------------------------------------------------------
+SIMPLEICONS_SLUGS: dict[str, str] = {
+    "JWT": "jsonwebtokens",
+    "OAuth": "oauth",
+    "Okta": "okta",
+    "Keycloak": "keycloak",
+    "NextAuth.js": "nextdotjs",
+    "Passport.js": "passport",
+    "RabbitMQ": "rabbitmq",
+    "Celery": "celery",
+    "NATS": "natsdotio",
+    "AWS SQS/SNS": "amazonsqs",
+    "Google Pub/Sub": "googlepubsub",
+    "DynamoDB": "amazondynamodb",
+    "PlanetScale": "planetscale",
+    "InfluxDB": "influxdb",
+    "CockroachDB": "cockroachlabs",
+    "Supabase Auth": "supabase",
+    "Firebase Auth": "firebase",
+    "AWS CDK": "amazonaws",
+    "Serverless Framework": "serverless",
+    "Fly.io": "flyio",
+}
+
+# ---------------------------------------------------------------------------
+# Clearbit domain map — final fallback for logo images
 # ---------------------------------------------------------------------------
 TECH_DOMAINS: dict[str, str] = {
-    # Languages
     "Python": "python.org",
     "JavaScript": "javascript.info",
     "TypeScript": "typescriptlang.org",
@@ -36,7 +190,6 @@ TECH_DOMAINS: dict[str, str] = {
     "Elixir": "elixir-lang.org",
     "Haskell": "haskell.org",
     "Dart": "dart.dev",
-    # Frameworks
     "FastAPI": "fastapi.tiangolo.com",
     "Flask": "flask.palletsprojects.com",
     "Django": "djangoproject.com",
@@ -52,7 +205,6 @@ TECH_DOMAINS: dict[str, str] = {
     "Spring Boot": "spring.io",
     "Ruby on Rails": "rubyonrails.org",
     "Laravel": "laravel.com",
-    # Databases
     "PostgreSQL": "postgresql.org",
     "MySQL": "mysql.com",
     "MySQL / MariaDB": "mysql.com",
@@ -72,7 +224,6 @@ TECH_DOMAINS: dict[str, str] = {
     "SQLAlchemy / Alembic": "sqlalchemy.org",
     "TypeORM": "typeorm.io",
     "Sequelize ORM": "sequelize.org",
-    # Auth
     "OAuth": "oauth.net",
     "JWT": "jwt.io",
     "Auth0": "auth0.com",
@@ -80,19 +231,16 @@ TECH_DOMAINS: dict[str, str] = {
     "Keycloak": "keycloak.org",
     "NextAuth.js": "next-auth.js.org",
     "Supabase Auth": "supabase.com",
-    # Messaging
     "Apache Kafka": "kafka.apache.org",
     "RabbitMQ": "rabbitmq.com",
     "Celery": "celeryq.dev",
     "NATS": "nats.io",
-    # CI/CD
     "GitHub Actions": "github.com",
     "CircleCI": "circleci.com",
     "Jenkins": "jenkins.io",
     "GitLab CI": "gitlab.com",
     "Travis CI": "travis-ci.com",
     "Azure Pipelines": "azure.microsoft.com",
-    # Containers / Infra
     "Docker": "docker.com",
     "Docker Compose": "docker.com",
     "Kubernetes": "kubernetes.io",
@@ -102,7 +250,6 @@ TECH_DOMAINS: dict[str, str] = {
     "Serverless Framework": "serverless.com",
     "AWS CDK": "aws.amazon.com",
     "Ansible": "ansible.com",
-    # Cloud
     "AWS": "aws.amazon.com",
     "Google Cloud": "cloud.google.com",
     "Azure": "azure.microsoft.com",
@@ -114,30 +261,24 @@ TECH_DOMAINS: dict[str, str] = {
     "Fly.io": "fly.io",
 }
 
-# Wikimedia Commons API fallbacks: tech label → search term
-WIKIMEDIA_TERMS: dict[str, str] = {
-    "JavaScript": "JavaScript_logo",
-    "Node.js / npm": "Npm_logo",
-    "Go": "Go_Logo_Blue",
-    "Shell": "Bash_Logo_Colored",
-    "Make": "GNU_Make_logo",
-}
-
 _SESSION = requests.Session()
 _SESSION.headers.update({"User-Agent": "TechStackAnalyzer/1.0 (github.com)"})
 
+_DEVICON_BASE = (
+    "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/{slug}/{slug}-original.png"
+)
+_DEVICON_PLAIN_BASE = (
+    "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/{slug}/{slug}-plain.png"
+)
+_SIMPLEICONS_BASE = "https://cdn.simpleicons.org/{slug}/FFFFFF"
 
-def _clearbit_url(domain: str) -> str:
-    return f"https://logo.clearbit.com/{domain}?size=256"
 
-
-def _fetch_clearbit(tech: str, dest: Path) -> bool:
-    domain = TECH_DOMAINS.get(tech)
-    if not domain:
-        return False
+def _try_download(url: str, dest: Path, timeout: int = 10) -> bool:
+    """GET *url* and save to *dest* if the response is an image. Returns True on success."""
     try:
-        resp = _SESSION.get(_clearbit_url(domain), timeout=10)
-        if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image"):
+        resp = _SESSION.get(url, timeout=timeout)
+        ct = resp.headers.get("content-type", "")
+        if resp.status_code == 200 and ("image" in ct or "svg" in ct):
             dest.write_bytes(resp.content)
             return True
     except Exception:
@@ -145,55 +286,60 @@ def _fetch_clearbit(tech: str, dest: Path) -> bool:
     return False
 
 
-def _wikimedia_url(term: str) -> str | None:
-    """Return a direct URL to the first image result on Wikimedia Commons."""
-    api = "https://commons.wikimedia.org/w/api.php"
-    params = {
-        "action": "query",
-        "list": "search",
-        "srsearch": term,
-        "srnamespace": "6",
-        "srlimit": "1",
-        "format": "json",
-    }
+def _svg_to_png(svg_path: Path, size: int = 256) -> bool:
+    """Convert an SVG file to PNG using cairosvg if available, else return False."""
     try:
-        resp = _SESSION.get(api, params=params, timeout=10)
-        data = resp.json()
-        hits = data.get("query", {}).get("search", [])
-        if not hits:
-            return None
-        title = hits[0]["title"]
-        # Fetch the image URL
-        info_resp = _SESSION.get(api, params={
-            "action": "query",
-            "titles": title,
-            "prop": "imageinfo",
-            "iiprop": "url",
-            "format": "json",
-        }, timeout=10)
-        pages = info_resp.json().get("query", {}).get("pages", {})
-        for page in pages.values():
-            urls = page.get("imageinfo", [])
-            if urls:
-                return urls[0]["url"]
+        import cairosvg  # type: ignore[import]
+        png_path = svg_path.with_suffix(".png")
+        cairosvg.svg2png(
+            url=str(svg_path),
+            write_to=str(png_path),
+            output_width=size,
+            output_height=size,
+        )
+        svg_path.unlink(missing_ok=True)
+        return True
     except Exception:
-        pass
+        return False
+
+
+def _fetch_devicon(tech: str, dest_dir: Path) -> str | None:
+    """Try Devicon CDN (original, then plain variant). Returns file path or None."""
+    slug = DEVICON_SLUGS.get(tech)
+    if not slug:
+        return None
+    dest = dest_dir / f"{slugify(tech)}.png"
+    # Try original colour variant
+    for url_tpl in (_DEVICON_BASE, _DEVICON_PLAIN_BASE):
+        url = url_tpl.format(slug=slug)
+        if _try_download(url, dest):
+            return str(dest)
     return None
 
 
-def _fetch_wikimedia(tech: str, dest: Path) -> bool:
-    term = WIKIMEDIA_TERMS.get(tech, tech + " logo")
-    url = _wikimedia_url(term)
-    if not url:
-        return False
-    try:
-        resp = _SESSION.get(url, timeout=15)
-        if resp.status_code == 200:
-            dest.write_bytes(resp.content)
-            return True
-    except Exception:
-        pass
-    return False
+def _fetch_simpleicons(tech: str, dest_dir: Path) -> str | None:
+    """Try SimpleIcons CDN (white SVG, converted to PNG if possible). Returns path or None."""
+    slug = SIMPLEICONS_SLUGS.get(tech) or re.sub(r"[^a-z0-9]", "", tech.lower())
+    svg_dest = dest_dir / f"{slugify(tech)}.svg"
+    if _try_download(_SIMPLEICONS_BASE.format(slug=slug), svg_dest):
+        # Try SVG→PNG conversion
+        if _svg_to_png(svg_dest):
+            return str(svg_dest.with_suffix(".png"))
+        # Keep the SVG as-is; moviepy can handle it via PIL
+        return str(svg_dest)
+    return None
+
+
+def _fetch_clearbit(tech: str, dest_dir: Path) -> str | None:
+    """Try Clearbit Logo API. Returns file path or None."""
+    domain = TECH_DOMAINS.get(tech)
+    if not domain:
+        return None
+    dest = dest_dir / f"{slugify(tech)}.png"
+    url = f"https://logo.clearbit.com/{domain}?size=256"
+    if _try_download(url, dest):
+        return str(dest)
+    return None
 
 
 # Palette for placeholders (cycles through a pleasant set)
@@ -206,20 +352,39 @@ _PALETTE = [
     ("#1ABC9C", "#FFFFFF"),
     ("#E74C3C", "#FFFFFF"),
     ("#3498DB", "#FFFFFF"),
+    ("#8E44AD", "#FFFFFF"),
+    ("#16A085", "#FFFFFF"),
 ]
 
 
-def _make_placeholder(tech: str, dest: Path, index: int = 0) -> None:
-    """Create a simple coloured placeholder PNG when no logo is found."""
-    bg_color, text_color = _PALETTE[index % len(_PALETTE)]
-    img = Image.new("RGBA", (256, 256), bg_color)
+def _make_placeholder(tech: str, dest: Path, index: int = 0) -> str:
+    """Create a polished coloured placeholder PNG when no logo is found."""
+    bg_hex, text_hex = _PALETTE[index % len(_PALETTE)]
+
+    def _hex(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    size = 256
+    # Gradient background
+    bg_rgb = _hex(bg_hex)
+    dark_rgb = tuple(max(0, c - 40) for c in bg_rgb)
+    img = Image.new("RGBA", (size, size))
+    for y in range(size):
+        t = y / size
+        row_color = tuple(int((1 - t) * a + t * b) for a, b in zip(bg_rgb, dark_rgb)) + (255,)  # type: ignore[arg-type]
+        for x in range(size):
+            img.putpixel((x, y), row_color)
+
     draw = ImageDraw.Draw(img)
 
-    # Try to fit text
-    label = tech[:20] + ("…" if len(tech) > 20 else "")
+    # Rounded rectangle overlay
+    draw.rounded_rectangle([12, 12, size - 12, size - 12], radius=20, outline=text_hex + "44", width=2)
+
+    label = tech[:18] + ("…" if len(tech) > 18 else "")
     font_path = find_system_font(bold=True)
     try:
-        font = ImageFont.truetype(font_path, size=24) if font_path else ImageFont.load_default()
+        font = ImageFont.truetype(font_path, size=22) if font_path else ImageFont.load_default()
     except Exception:
         font = ImageFont.load_default()
 
@@ -227,11 +392,43 @@ def _make_placeholder(tech: str, dest: Path, index: int = 0) -> None:
     bbox = draw.textbbox((0, 0), label, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
-    x = (256 - text_w) // 2
-    y = (256 - text_h) // 2
-    draw.text((x, y), label, fill=text_color, font=font)
+    x = (size - text_w) // 2
+    y = (size - text_h) // 2
+    # Shadow
+    draw.text((x + 2, y + 2), label, fill="#00000066", font=font)
+    draw.text((x, y), label, fill=text_hex, font=font)
 
     img.save(str(dest), "PNG")
+    return str(dest)
+
+
+def _fetch_logo_for_tech(args: tuple[int, str, Path]) -> tuple[str, str, str]:
+    """
+    Worker function run in thread pool.
+
+    Returns (tech, file_path, source_label).
+    """
+    index, tech, logo_dir = args
+
+    # 1 – Devicon
+    path = _fetch_devicon(tech, logo_dir)
+    if path:
+        return tech, path, "Devicon"
+
+    # 2 – SimpleIcons
+    path = _fetch_simpleicons(tech, logo_dir)
+    if path:
+        return tech, path, "SimpleIcons"
+
+    # 3 – Clearbit
+    path = _fetch_clearbit(tech, logo_dir)
+    if path:
+        return tech, path, "Clearbit"
+
+    # 4 – Placeholder (always succeeds)
+    dest = logo_dir / f"{slugify(tech)}.png"
+    path = _make_placeholder(tech, dest, index=index)
+    return tech, path, "placeholder"
 
 
 def fetch_logos(
@@ -239,46 +436,44 @@ def fetch_logos(
     output_dir: str | Path,
 ) -> dict[str, str]:
     """
-    Download logos for each technology in *tech_list*.
+    Download logos for each technology in *tech_list* using parallel HTTP requests.
 
     Returns a mapping {tech_label: local_file_path}.
     """
-    out = Path(output_dir) / "logos"
-    out.mkdir(parents=True, exist_ok=True)
+    logo_dir = Path(output_dir) / "logos"
+    logo_dir.mkdir(parents=True, exist_ok=True)
 
+    # Determine which techs still need downloading (cache check)
+    to_fetch: list[tuple[int, str, Path]] = []
     result: dict[str, str] = {}
+
     for index, tech in enumerate(tech_list):
         slug = slugify(tech)
-        # Check all candidate extensions
         cached: Path | None = None
         for ext in (".png", ".jpg", ".jpeg", ".svg"):
-            candidate = out / f"{slug}{ext}"
+            candidate = logo_dir / f"{slug}{ext}"
             if candidate.exists():
                 cached = candidate
                 break
-
         if cached:
             result[tech] = str(cached)
-            continue
+        else:
+            to_fetch.append((index, tech, logo_dir))
 
-        dest_png = out / f"{slug}.png"
-        dest_jpg = out / f"{slug}.jpg"
+    if not to_fetch:
+        return result
 
-        # Strategy 1 – Clearbit
-        if _fetch_clearbit(tech, dest_png):
-            print(f"  [IMG] {tech} → Clearbit logo")
-            result[tech] = str(dest_png)
-            continue
-
-        # Strategy 2 – Wikimedia Commons
-        if _fetch_wikimedia(tech, dest_jpg):
-            print(f"  [IMG] {tech} → Wikimedia Commons")
-            result[tech] = str(dest_jpg)
-            continue
-
-        # Strategy 3 – Placeholder
-        print(f"  [IMG] {tech} → placeholder")
-        _make_placeholder(tech, dest_png, index=index)
-        result[tech] = str(dest_png)
+    # Parallel fetch with a thread pool
+    max_workers = min(8, len(to_fetch))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_logo_for_tech, args): args for args in to_fetch}
+        for future in as_completed(futures):
+            try:
+                tech, path, source = future.result()
+                print(f"  [IMG] {tech} → {source}")
+                result[tech] = path
+            except Exception as exc:
+                _, tech_name, _ = futures[future]
+                print(f"  [IMG] {tech_name} → error: {exc}")
 
     return result

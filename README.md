@@ -9,11 +9,24 @@ A CLI tool that accepts any public GitHub repo URL and performs a **deep tech st
 | Capability | Details |
 |---|---|
 | **Stack Detection** | Languages, package managers, databases, CI/CD, containers, auth, messaging, cloud SDKs |
-| **Script Generation** | Structured, spoken-word narration split into sections |
+| **Script Generation** | Engaging, spoken-word narration split into 8 thematic sections |
+| **AI Enhancement** | Optional [Ollama](https://ollama.com) LLM (free, local) to rewrite scripts into richer prose |
 | **Text-to-Speech** | Per-section MP3 clips via `edge-tts` (falls back to `gTTS`) |
-| **Image Gathering** | Tech logos via Clearbit → Wikimedia → coloured placeholder |
-| **Video Generation** | `moviepy`-assembled `.mp4` with slide transitions and audio sync |
+| **Image Gathering** | Tech logos via Devicon CDN → SimpleIcons → Clearbit → coloured placeholder; **parallel downloads** for speed |
+| **Video Generation** | PIL-rendered slides with gradient backgrounds, logo grids, and section counters; `libx264 ultrafast` encoding |
 | **Reports** | Terminal table + `stack_report.json` |
+
+---
+
+## Slide Design
+
+Each slide features:
+- **Dark gradient background** with subtle grid overlay
+- **Large bold title** (Lato font) with a unique colour-accented underline per section
+- **Section counter pill** (e.g. `2 / 8`) in the top-right corner
+- **Tech logo grid** (up to 8 logos, 2 rows of 4, with drop shadows and card outlines)
+- **Narration panel** at the bottom with the spoken text
+- **Branding watermark** in the corner
 
 ---
 
@@ -31,11 +44,6 @@ A CLI tool that accepts any public GitHub repo URL and performs a **deep tech st
   brew install ffmpeg
 
   # Windows — download from https://ffmpeg.org/download.html
-  ```
-- (Optional) ImageMagick — required for `TextClip` in moviepy on Linux/macOS
-  ```bash
-  sudo apt install imagemagick   # Ubuntu/Debian
-  brew install imagemagick       # macOS
   ```
 
 ### Install Python dependencies
@@ -61,6 +69,8 @@ python analyze.py analyze <GITHUB_REPO_URL> [options]
 | `--skip-video` | Skip image gathering and video generation. |
 | `--skip-audio` | Skip TTS audio generation. |
 | `--voice VOICE` | `edge-tts` voice (default: `en-US-AriaNeural`). Run `edge-tts --list-voices` to browse. |
+| `--use-ollama` | Enhance scripts with a locally-running Ollama model (see below). Falls back to templates if Ollama is unavailable. |
+| `--ollama-model MODEL` | Ollama model to use (default: `llama3`). Only used with `--use-ollama`. |
 
 ### Examples
 
@@ -76,7 +86,25 @@ python analyze.py analyze https://github.com/django/django --skip-video
 
 # Report only (no audio or video)
 python analyze.py analyze https://github.com/torvalds/linux --skip-audio --skip-video
+
+# Use Ollama to generate richer narration scripts
+python analyze.py analyze https://github.com/tiangolo/fastapi --use-ollama
+
+# Use a specific Ollama model
+python analyze.py analyze https://github.com/tiangolo/fastapi --use-ollama --ollama-model mistral
 ```
+
+---
+
+## AI-Enhanced Scripts with Ollama (Free & Local)
+
+Pass `--use-ollama` to have a locally-running [Ollama](https://ollama.com) model rewrite each narration section into more engaging, conversational prose — like a knowledgeable friend explaining the project.
+
+1. **Install Ollama**: https://ollama.com/download
+2. **Pull a model**: `ollama pull llama3` (or `mistral`, `phi3`, etc.)
+3. **Run the analyzer**: `python analyze.py analyze <URL> --use-ollama`
+
+If Ollama is not installed or not running, the tool falls back to its built-in template narration automatically.
 
 ---
 
@@ -117,11 +145,12 @@ A formatted summary table is also printed to the terminal.
 analyze.py                  ← argparse CLI entry point
 techstack/
   detector.py               ← GitHub API scanning & pattern matching
-  script_generator.py       ← Natural-language narration script
+  script_generator.py       ← Natural-language narration script (+ Ollama enhancement)
   tts.py                    ← Text-to-speech (edge-tts / gTTS)
-  image_gatherer.py         ← Logo fetching (Clearbit / Wikimedia / placeholder)
-  video_generator.py        ← moviepy slide assembly & export
+  image_gatherer.py         ← Logo fetching (Devicon / SimpleIcons / Clearbit / placeholder)
+  video_generator.py        ← PIL slide renderer + moviepy assembly & ultrafast export
   reporter.py               ← Rich terminal table + JSON report
+  utils.py                  ← Shared font & slugify helpers
 requirements.txt
 ```
 

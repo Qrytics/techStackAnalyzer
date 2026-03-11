@@ -39,6 +39,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     skip_video: bool = args.skip_video
     skip_audio: bool = args.skip_audio
     voice: str = args.voice
+    use_ollama: bool = args.use_ollama
+    ollama_model: str = args.ollama_model
 
     print(f"\n🔍 Analyzing: {repo_url}\n")
 
@@ -74,7 +76,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print("\n── Step 3/5  Script Generation ──────────────────────────────")
     from techstack.script_generator import generate
 
-    sections = generate(stack)
+    sections = generate(stack, use_ollama=use_ollama, ollama_model=ollama_model)
     for s in sections:
         print(f"   • {s['title']} ({len(s['text'].split())} words)")
 
@@ -193,6 +195,21 @@ Examples:
         default="en-US-AriaNeural",
         help="edge-tts voice name (default: en-US-AriaNeural). "
              "Run `edge-tts --list-voices` to see available voices.",
+    )
+    analyze_parser.add_argument(
+        "--use-ollama",
+        action="store_true",
+        default=False,
+        help="Use a locally-running Ollama model to enhance the generated scripts. "
+             "Requires Ollama to be installed and running (https://ollama.com). "
+             "Falls back to template text if Ollama is unavailable.",
+    )
+    analyze_parser.add_argument(
+        "--ollama-model",
+        metavar="MODEL",
+        default="llama3",
+        help="Ollama model to use for script enhancement (default: llama3). "
+             "Only used when --use-ollama is set.",
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 
