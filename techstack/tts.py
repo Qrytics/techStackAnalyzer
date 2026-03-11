@@ -12,11 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-
-def _slugify(text: str) -> str:
-    """Convert a section title to a safe filename component."""
-    import re
-    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+from techstack.utils import slugify
 
 
 async def _edge_tts_generate(text: str, output_path: str, voice: str = "en-US-AriaNeural") -> None:
@@ -56,7 +52,7 @@ def generate_audio_clips(
 
     augmented: list[dict[str, Any]] = []
     for i, section in enumerate(sections):
-        title_slug = _slugify(section["title"])
+        title_slug = slugify(section["title"])
         filename = f"{i:02d}_{title_slug}.mp3"
         mp3_path = str(out / filename)
 

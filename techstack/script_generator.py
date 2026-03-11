@@ -10,6 +10,19 @@ from __future__ import annotations
 from typing import Any
 
 
+_ORM_LABELS: frozenset[str] = frozenset({
+    "SQLAlchemy / Alembic",
+    "Prisma ORM",
+    "TypeORM",
+    "Sequelize ORM",
+    "Django ORM",
+    "ActiveRecord (Rails)",
+    "Hibernate ORM",
+    "Drizzle ORM",
+    "MikroORM",
+})
+
+
 def _pluralise(items: list[str]) -> str:
     """Join a list of items into a human-readable, comma-separated string."""
     if not items:
@@ -104,7 +117,7 @@ def generate(stack: dict[str, Any]) -> list[dict[str, Any]]:
         data_text += (
             f"The data layer relies on {_pluralise(databases)}. "
         )
-        if any("ORM" in d or "Prisma" in d or "SQLAlchemy" in d or "Sequelize" in d for d in databases):
+        if any(d in _ORM_LABELS for d in databases):
             data_text += (
                 "An ORM layer is present, abstracting direct SQL queries and providing "
                 "schema management capabilities. "

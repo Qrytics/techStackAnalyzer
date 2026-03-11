@@ -142,7 +142,7 @@ CONTENT_PATTERNS: list[tuple[str, str, str]] = [
     (r"postgresql|postgres|pg_connect|psycopg|asyncpg", "database", "PostgreSQL"),
     (r"mysql|mysqlclient|pymysql|aiomysql", "database", "MySQL"),
     (r"mongodb|mongoose|pymongo|motor", "database", "MongoDB"),
-    (r"redis(?!-om)", "database", "Redis"),
+    (r"\bredis\b", "database", "Redis"),
     (r"sqlite|aiosqlite", "database", "SQLite"),
     (r"elasticsearch|opensearch", "database", "Elasticsearch"),
     (r"cassandra|astra", "database", "Cassandra"),

@@ -9,11 +9,12 @@ Strategy (in priority order):
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import requests
 from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
+
+from techstack.utils import find_system_font, slugify
 
 # ---------------------------------------------------------------------------
 # Domain map: technology label → Clearbit domain
@@ -216,8 +217,9 @@ def _make_placeholder(tech: str, dest: Path, index: int = 0) -> None:
 
     # Try to fit text
     label = tech[:20] + ("…" if len(tech) > 20 else "")
+    font_path = find_system_font(bold=True)
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size=24)
+        font = ImageFont.truetype(font_path, size=24) if font_path else ImageFont.load_default()
     except Exception:
         font = ImageFont.load_default()
 
@@ -230,11 +232,6 @@ def _make_placeholder(tech: str, dest: Path, index: int = 0) -> None:
     draw.text((x, y), label, fill=text_color, font=font)
 
     img.save(str(dest), "PNG")
-
-
-def _slugify(text: str) -> str:
-    import re
-    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
 
 
 def fetch_logos(
@@ -251,7 +248,7 @@ def fetch_logos(
 
     result: dict[str, str] = {}
     for index, tech in enumerate(tech_list):
-        slug = _slugify(tech)
+        slug = slugify(tech)
         # Check all candidate extensions
         cached: Path | None = None
         for ext in (".png", ".jpg", ".jpeg", ".svg"):

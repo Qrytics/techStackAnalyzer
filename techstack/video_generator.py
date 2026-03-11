@@ -31,6 +31,8 @@ from moviepy import (  # type: ignore[import]
 )
 from PIL import Image  # type: ignore[import]
 
+from techstack.utils import find_system_font
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -50,23 +52,8 @@ LOGO_TOP_MARGIN = 220              # px from top of frame
 
 
 def _find_font(bold: bool = False) -> str | None:
-    """Return a font path available on the system, or None to let moviepy pick."""
-    candidates_bold = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-        "/Library/Fonts/Arial Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-    ]
-    candidates_regular = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-    ]
-    for p in (candidates_bold if bold else candidates_regular):
-        if os.path.exists(p):
-            return p
-    return None
+    """Return a font path available on the current system, or None."""
+    return find_system_font(bold=bold)
 
 
 def _resize_image_to_box(src: str, max_size: int) -> Image.Image:
