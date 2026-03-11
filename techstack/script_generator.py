@@ -15,7 +15,6 @@ text is used automatically as a fallback.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 
@@ -62,16 +61,25 @@ def _enhance_with_ollama(
     If Ollama is not available (not installed, not running, or any error),
     the original template text is returned unchanged.
 
+    The Ollama base URL can be overridden via the ``OLLAMA_HOST`` environment
+    variable (default: ``http://localhost:11434``).
+
     Parameters
     ----------
     sections : list returned by the template generator
     stack    : raw stack detection result (for extra context)
     model    : Ollama model name (default: ``llama3``)
     """
+    import os as _os
+
     try:
         import requests as _req
+        from requests.exceptions import ConnectionError as _ConnErr, RequestException as _ReqExc
     except ImportError:
         return sections
+
+    ollama_base = _os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    endpoint = f"{ollama_base}/api/generate"
 
     system_prompt = (
         "You are a professional tech narrator writing scripts for short, engaging YouTube "
@@ -83,7 +91,7 @@ def _enhance_with_ollama(
     )
 
     enhanced: list[dict[str, Any]] = []
-    _ollama_available = True  # flip False on first connection error to suppress repeat noise
+    _ollama_available = True  # flip False on first connection error to suppress noise
 
     for section in sections:
         original_text = section["text"]
@@ -96,7 +104,7 @@ def _enhance_with_ollama(
         if _ollama_available:
             try:
                 resp = _req.post(
-                    "http://localhost:11434/api/generate",
+                    endpoint,
                     json={
                         "model": model,
                         "system": system_prompt,
@@ -113,15 +121,12 @@ def _enhance_with_ollama(
                         enhanced.append({**section, "text": new_text})
                         print(f"  [Ollama] ✓ {section['title']!r}")
                         continue
-            except (ConnectionRefusedError, Exception) as exc:
-                # Detect connection failures to suppress repeated noise
-                exc_str = str(exc)
-                if "Connection refused" in exc_str or "Max retries exceeded" in exc_str or "NewConnectionError" in exc_str:
-                    print("  [Ollama] Not reachable at localhost:11434 — falling back to template text.")
-                    _ollama_available = False
-                else:
-                    _short = exc_str.split("\n")[0][:120]
-                    print(f"  [Ollama] {section['title']!r} → {_short}")
+            except _ConnErr:
+                print(f"  [Ollama] Not reachable at {ollama_base} — falling back to template text.")
+                _ollama_available = False
+            except _ReqExc as exc:
+                _short = str(exc).split("\n")[0][:120]
+                print(f"  [Ollama] {section['title']!r} → {_short}")
         enhanced.append(section)
 
     return enhanced

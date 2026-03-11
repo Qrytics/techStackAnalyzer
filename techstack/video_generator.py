@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter  # type: ignore[import]
+from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
 from moviepy import (  # type: ignore[import]
     AudioFileClip,
     ImageClip,
@@ -39,7 +39,7 @@ VIDEO_H = 720
 FPS = 15                  # 15 fps is plenty for a slideshow and encodes ~2× faster
 FADE_DURATION = 0.5       # seconds
 
-# Colour palette
+# Colour palette (RGB)
 BG_TOP    = (10, 12, 35)   # deep navy
 BG_BOTTOM = (20, 24, 60)   # slightly lighter navy
 ACCENT_COLORS = [
@@ -71,71 +71,69 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageF
     if path:
         try:
             return ImageFont.truetype(path, size=size)
-        except Exception:
+        except (OSError, IOError):
             pass
     return ImageFont.load_default()
 
 
 # ---------------------------------------------------------------------------
-# Frame rendering (pure PIL)
+# Frame rendering (pure PIL — all drawing on RGBA canvas)
 # ---------------------------------------------------------------------------
 def _gradient_bg(w: int, h: int) -> Image.Image:
-    """Render a top-to-bottom gradient background."""
-    img = Image.new("RGB", (w, h))
+    """Render a top-to-bottom gradient background (RGBA)."""
     top = np.array(BG_TOP, dtype=np.float32)
     bot = np.array(BG_BOTTOM, dtype=np.float32)
     arr = np.zeros((h, w, 3), dtype=np.uint8)
     for y in range(h):
         t = y / (h - 1)
         arr[y, :] = ((1 - t) * top + t * bot).astype(np.uint8)
-    return Image.fromarray(arr, "RGB")
+    rgb = Image.fromarray(arr, "RGB")
+    return rgb.convert("RGBA")
 
 
 def _draw_accent_bar(draw: ImageDraw.ImageDraw, color: tuple[int, int, int], w: int) -> None:
-    """Draw a thin coloured bar at the top of the frame."""
-    bar_h = 5
-    draw.rectangle([0, 0, w, bar_h], fill=color)
+    """Draw a thin coloured bar at the top of the frame (fully opaque)."""
+    draw.rectangle([0, 0, w, 5], fill=(*color, 255))
 
 
 def _draw_title(
     draw: ImageDraw.ImageDraw,
+    frame: Image.Image,
     title: str,
     accent: tuple[int, int, int],
     w: int,
     font_bold: Any,
-    font_regular: Any,
+    font_counter: Any,
     section_num: int,
     total_sections: int,
 ) -> None:
-    """Render the slide title and a progress indicator."""
-    # Section counter pill (top-right)
+    """Render the slide title and a section progress pill (RGBA canvas)."""
+    # Section counter pill (top-right corner)
     pill_text = f"{section_num} / {total_sections}"
-    pill_font = font_regular
-    pb = draw.textbbox((0, 0), pill_text, font=pill_font)
+    pb = draw.textbbox((0, 0), pill_text, font=font_counter)
     pill_w = pb[2] - pb[0] + 20
     pill_h = pb[3] - pb[1] + 8
     pill_x = w - pill_w - 28
     pill_y = 18
-    draw.rounded_rectangle([pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
-                            radius=pill_h // 2, fill=(*accent, 180))
-    draw.text((pill_x + 10, pill_y + 4), pill_text, fill=(255, 255, 255), font=pill_font)
+    # Semi-transparent pill via alpha_composite on the RGBA frame
+    pill_overlay = Image.new("RGBA", (pill_w, pill_h), (*accent, 190))
+    frame.alpha_composite(pill_overlay, (pill_x, pill_y))
+    draw.text((pill_x + 10, pill_y + 4), pill_text, fill=(255, 255, 255, 255), font=font_counter)
 
-    # Title
+    # Title text
     title_y = 38
-    title_font = font_bold
-    draw.text((60, title_y), title, fill=(255, 255, 255), font=title_font)
+    draw.text((60, title_y), title, fill=(255, 255, 255, 255), font=font_bold)
 
     # Accent underline
-    tb = draw.textbbox((60, title_y), title, font=title_font)
+    tb = draw.textbbox((60, title_y), title, font=font_bold)
     line_y = tb[3] + 10
     line_end = min(tb[2] + 20, w - 60)
-    draw.line([(60, line_y), (line_end, line_y)], fill=accent, width=3)
-    # Faded extension
+    draw.line([(60, line_y), (line_end, line_y)], fill=(*accent, 255), width=3)
+    # Faded dotted extension
     for i in range(4):
         x = line_end + i * 8
-        alpha = 180 - i * 45
-        draw.line([(x, line_y), (x + 6, line_y)],
-                  fill=(*accent, max(0, alpha)), width=3)
+        alpha = max(0, 180 - i * 45)
+        draw.line([(x, line_y), (x + 6, line_y)], fill=(*accent, alpha), width=3)
 
 
 def _draw_narration_panel(
@@ -145,21 +143,20 @@ def _draw_narration_panel(
     h: int,
     font: Any,
 ) -> None:
-    """Draw a frosted dark panel at the bottom with wrapped narration text."""
+    """Composite a frosted dark panel at the bottom of the RGBA *frame*."""
     panel_h = 130
     panel_y = h - panel_h
 
-    # Semi-transparent overlay
-    overlay = Image.new("RGBA", (w, panel_h), (5, 8, 25, 210))
-    frame.paste(Image.fromarray(np.array(overlay)[:, :, :3]), (0, panel_y),
-                mask=Image.fromarray(np.array(overlay)[:, :, 3]))
+    # Semi-transparent dark overlay via alpha_composite
+    panel = Image.new("RGBA", (w, panel_h), (5, 8, 25, 215))
+    frame.alpha_composite(panel, (0, panel_y))
 
     draw = ImageDraw.Draw(frame)
     # Thin separator line
-    draw.line([(0, panel_y), (w, panel_y)], fill=(80, 80, 120), width=1)
+    draw.line([(0, panel_y), (w, panel_y)], fill=(80, 80, 120, 255), width=1)
 
     wrapped = "\n".join(textwrap.wrap(text, width=100))
-    draw.text((40, panel_y + 14), wrapped, fill=(210, 215, 235), font=font)
+    draw.text((40, panel_y + 14), wrapped, fill=(210, 215, 235, 255), font=font)
 
 
 def _paste_logos(
@@ -170,7 +167,7 @@ def _paste_logos(
     top_margin: int,
     bottom_limit: int,
 ) -> None:
-    """Paste tech logos onto *frame* in a centred, evenly-spaced grid."""
+    """Composite tech logos onto *frame* (RGBA) in a centred, evenly-spaced grid."""
     if not logo_paths:
         return
 
@@ -182,7 +179,7 @@ def _paste_logos(
             img = Image.open(p).convert("RGBA")
             img.thumbnail((LOGO_MAX_SIZE, LOGO_MAX_SIZE), Image.LANCZOS)
             imgs.append(img)
-        except Exception:
+        except (OSError, IOError, Exception):
             pass
 
     if not imgs:
@@ -197,29 +194,25 @@ def _paste_logos(
     row_h = LOGO_MAX_SIZE + LOGO_PADDING
     start_y = top_margin + max(0, (available_h - rows * row_h) // 2)
 
+    draw = ImageDraw.Draw(frame)
+
     for idx, img in enumerate(imgs):
         col = idx % cols
         row = idx // cols
         cx = start_x + col * (LOGO_MAX_SIZE + LOGO_PADDING) + (LOGO_MAX_SIZE - img.width) // 2
         cy = start_y + row * row_h + (LOGO_MAX_SIZE - img.height) // 2
 
-        # Subtle drop shadow
-        shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        shadow_mask = img.split()[3] if img.mode == "RGBA" else None
-        sh = Image.new("RGBA", img.size, (0, 0, 0, 100))
-        if shadow_mask:
-            frame.paste(sh, (cx + 3, cy + 3), mask=shadow_mask)
+        # Drop shadow (semi-transparent black)
+        shadow = Image.new("RGBA", img.size, (0, 0, 0, 100))
+        frame.alpha_composite(shadow, (cx + 3, cy + 3))
 
-        if img.mode == "RGBA":
-            frame.paste(img, (cx, cy), mask=img.split()[3])
-        else:
-            frame.paste(img, (cx, cy))
+        # Logo image
+        frame.alpha_composite(img, (cx, cy))
 
-        # Subtle card outline
-        draw = ImageDraw.Draw(frame)
+        # Subtle card outline (RGB-only since it's a solid line)
         draw.rounded_rectangle(
             [cx - 6, cy - 6, cx + img.width + 6, cy + img.height + 6],
-            radius=10, outline=(60, 65, 100, 120), width=1,
+            radius=10, outline=(60, 65, 100), width=1,
         )
 
 
@@ -232,7 +225,8 @@ def _render_slide_frame(
     """
     Render one slide as a numpy RGB array using PIL.
 
-    This is fast (no subprocess / ImageMagick calls).
+    All drawing is performed on an RGBA canvas; the result is converted to
+    RGB at the end before being handed off to moviepy.
     """
     accent = ACCENT_COLORS[section_index % len(ACCENT_COLORS)]
     title  = section["title"]
@@ -243,40 +237,38 @@ def _render_slide_frame(
     font_bold    = _load_font(TITLE_FONT_SIZE,  bold=True)
     font_regular = _load_font(BODY_FONT_SIZE,   bold=False)
     font_label   = _load_font(LABEL_FONT_SIZE,  bold=False)
-    font_counter = _load_font(14, bold=False)
+    font_counter = _load_font(14,               bold=False)
 
-    # Background
-    frame = _gradient_bg(VIDEO_W, VIDEO_H).convert("RGBA")
+    # RGBA canvas — gradient background
+    frame = _gradient_bg(VIDEO_W, VIDEO_H)   # RGBA
     draw  = ImageDraw.Draw(frame)
 
-    # Subtle grid pattern overlay
+    # Subtle grid pattern overlay (RGBA fill works on RGBA canvas)
     for x in range(0, VIDEO_W, 40):
         draw.line([(x, 0), (x, VIDEO_H)], fill=(255, 255, 255, 6), width=1)
     for y in range(0, VIDEO_H, 40):
         draw.line([(0, y), (VIDEO_W, y)], fill=(255, 255, 255, 6), width=1)
 
     _draw_accent_bar(draw, accent, VIDEO_W)
-    _draw_title(draw, title, accent, VIDEO_W, font_bold, font_counter, section_index + 1, total_sections)
+    _draw_title(draw, frame, title, accent, VIDEO_W, font_bold, font_counter, section_index + 1, total_sections)
 
     # Branding watermark (bottom-right, faint)
     brand = "Tech Stack Analyzer"
     bb = draw.textbbox((0, 0), brand, font=font_label)
     bw = bb[2] - bb[0]
-    draw.text((VIDEO_W - bw - 20, VIDEO_H - 22), brand,
-              fill=(80, 90, 130), font=font_label)
+    draw.text((VIDEO_W - bw - 20, VIDEO_H - 22), brand, fill=(80, 90, 130, 200), font=font_label)
 
-    frame_rgb = frame.convert("RGB")
-
-    # Logos
+    # Logos (composited onto RGBA frame)
     logo_paths = [logo_map[t] for t in techs if t in logo_map]
-    _paste_logos(frame_rgb, logo_paths, VIDEO_W, VIDEO_H,
+    _paste_logos(frame, logo_paths, VIDEO_W, VIDEO_H,
                  top_margin=LOGO_TOP_MARGIN, bottom_limit=VIDEO_H - 145)
 
-    # Narration text panel
+    # Narration text panel (composited onto RGBA frame)
     if text:
-        _draw_narration_panel(frame_rgb, text, VIDEO_W, VIDEO_H, font_regular)
+        _draw_narration_panel(frame, text, VIDEO_W, VIDEO_H, font_regular)
 
-    return np.array(frame_rgb)
+    # Convert to RGB for moviepy
+    return np.array(frame.convert("RGB"))
 
 
 # ---------------------------------------------------------------------------

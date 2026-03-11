@@ -287,9 +287,15 @@ def _try_download(url: str, dest: Path, timeout: int = 10) -> bool:
 
 
 def _svg_to_png(svg_path: Path, size: int = 256) -> bool:
-    """Convert an SVG file to PNG using cairosvg if available, else return False."""
+    """
+    Convert an SVG file to PNG using cairosvg if available.
+
+    ``cairosvg`` is an optional dependency — if it is not installed, SVG
+    files are kept as-is and the caller falls back to the next source.
+    Returns True if conversion succeeded, False otherwise.
+    """
     try:
-        import cairosvg  # type: ignore[import]
+        import cairosvg  # type: ignore[import]  # optional dep
         png_path = svg_path.with_suffix(".png")
         cairosvg.svg2png(
             url=str(svg_path),
@@ -299,8 +305,10 @@ def _svg_to_png(svg_path: Path, size: int = 256) -> bool:
         )
         svg_path.unlink(missing_ok=True)
         return True
-    except Exception:
-        return False
+    except ImportError:
+        return False  # cairosvg not installed — keep SVG and skip
+    except (OSError, IOError, Exception):
+        return False  # conversion failed for another reason
 
 
 def _fetch_devicon(tech: str, dest_dir: Path) -> str | None:
@@ -361,31 +369,36 @@ def _make_placeholder(tech: str, dest: Path, index: int = 0) -> str:
     """Create a polished coloured placeholder PNG when no logo is found."""
     bg_hex, text_hex = _PALETTE[index % len(_PALETTE)]
 
-    def _hex(h: str) -> tuple[int, int, int]:
+    def _hex_to_rgb(h: str) -> tuple[int, int, int]:
         h = h.lstrip("#")
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
     size = 256
-    # Gradient background
-    bg_rgb = _hex(bg_hex)
+    bg_rgb = _hex_to_rgb(bg_hex)
     dark_rgb = tuple(max(0, c - 40) for c in bg_rgb)
+
+    # Gradient background (RGBA)
     img = Image.new("RGBA", (size, size))
     for y in range(size):
         t = y / size
-        row_color = tuple(int((1 - t) * a + t * b) for a, b in zip(bg_rgb, dark_rgb)) + (255,)  # type: ignore[arg-type]
+        r = int((1 - t) * bg_rgb[0] + t * dark_rgb[0])
+        g = int((1 - t) * bg_rgb[1] + t * dark_rgb[1])
+        b = int((1 - t) * bg_rgb[2] + t * dark_rgb[2])
         for x in range(size):
-            img.putpixel((x, y), row_color)
+            img.putpixel((x, y), (r, g, b, 255))
 
     draw = ImageDraw.Draw(img)
 
-    # Rounded rectangle overlay
-    draw.rounded_rectangle([12, 12, size - 12, size - 12], radius=20, outline=text_hex + "44", width=2)
+    # Rounded border (use solid RGB tuple — RGBA images accept RGBA or RGB outlines)
+    text_rgb = _hex_to_rgb(text_hex)
+    draw.rounded_rectangle([12, 12, size - 12, size - 12], radius=20,
+                            outline=(*text_rgb, 68), width=2)
 
     label = tech[:18] + ("…" if len(tech) > 18 else "")
     font_path = find_system_font(bold=True)
     try:
         font = ImageFont.truetype(font_path, size=22) if font_path else ImageFont.load_default()
-    except Exception:
+    except (OSError, IOError):
         font = ImageFont.load_default()
 
     # Center the text
@@ -394,9 +407,10 @@ def _make_placeholder(tech: str, dest: Path, index: int = 0) -> str:
     text_h = bbox[3] - bbox[1]
     x = (size - text_w) // 2
     y = (size - text_h) // 2
-    # Shadow
-    draw.text((x + 2, y + 2), label, fill="#00000066", font=font)
-    draw.text((x, y), label, fill=text_hex, font=font)
+    # Shadow (semi-transparent black: 40% opacity = 102/255)
+    _SHADOW_ALPHA = 102
+    draw.text((x + 2, y + 2), label, fill=(0, 0, 0, _SHADOW_ALPHA), font=font)
+    draw.text((x, y), label, fill=(*text_rgb, 255), font=font)
 
     img.save(str(dest), "PNG")
     return str(dest)
