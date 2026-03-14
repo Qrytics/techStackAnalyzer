@@ -15,8 +15,13 @@ def find_system_font(bold: bool = False) -> str | None:
     the library's built-in default).
 
     Searches common font locations on Linux, macOS, and Windows.
+    Prefers Lato (modern, clean) then falls back to DejaVu / Liberation.
     """
     candidates_bold = [
+        # Lato — clean modern sans-serif, preferred
+        "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
+        "/usr/share/fonts/truetype/lato/Lato-Black.ttf",
+        # DejaVu fallback
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -25,6 +30,10 @@ def find_system_font(bold: bool = False) -> str | None:
         "C:/Windows/Fonts/arialbd.ttf",
     ]
     candidates_regular = [
+        # Lato — clean modern sans-serif, preferred
+        "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
+        "/usr/share/fonts/truetype/lato/Lato-Light.ttf",
+        # DejaVu fallback
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",

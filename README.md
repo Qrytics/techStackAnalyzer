@@ -11,8 +11,22 @@ A CLI tool that accepts any public GitHub repo URL and performs a **deep tech st
 | **Stack Detection** | Languages, package managers, databases, CI/CD, containers, auth, messaging, cloud SDKs |
 | **Rich Terminal Output** | Formatted summary table printed instantly (default) |
 | **JSON Report** | Machine-readable `stack_report.json` saved alongside the table |
+| **Script Generation** | Engaging, conversational narration split into 8 thematic sections |
+| **AI Enhancement** | Optional [Ollama](https://ollama.com) LLM (free, local) to rewrite scripts into richer prose |
 | **Audio Narration** | Per-section MP3 clips via `edge-tts` (falls back to `gTTS`) — opt-in with `--audio` |
-| **Explainer Video** | `moviepy`-assembled `.mp4` with slide transitions — opt-in with `--video` |
+| **Explainer Video** | PIL-rendered slides with gradient backgrounds, logo grids, and section counters — opt-in with `--video` |
+| **Image Pipeline** | Devicon CDN → SimpleIcons → Clearbit → placeholder; parallel downloads |
+
+---
+
+## Slide Design
+
+Each video slide features:
+- **Dark gradient background** with subtle grid overlay
+- **Large Lato bold title** with a unique colour-accented underline per section
+- **Section counter pill** (e.g. `2 / 8`) in the top-right corner
+- **Tech logo grid** (up to 8 logos, 4×2, with drop shadows)
+- **Narration panel** at the bottom with the spoken text
 
 ---
 
@@ -24,7 +38,6 @@ pip install .
 
 > **Prerequisites (for `--video` only)**
 > - `ffmpeg` on your `$PATH` — `sudo apt install ffmpeg` / `brew install ffmpeg`
-> - ImageMagick — `sudo apt install imagemagick` / `brew install imagemagick`
 
 ---
 
@@ -54,6 +67,8 @@ techstack
 | `--audio` | `-a` | Generate TTS audio narration (MP3). |
 | `--video` | `-v` | Generate explainer video (MP4). Implies `--audio`. |
 | `--voice VOICE` | | `edge-tts` voice (default: `en-US-AriaNeural`). Run `edge-tts --list-voices` to browse. |
+| `--use-ollama` | | Use a local Ollama LLM to enhance scripts (see below). Falls back gracefully if unavailable. |
+| `--ollama-model MODEL` | | Ollama model to use (default: `llama3`). Only used with `--use-ollama`. |
 
 ### Examples
 
@@ -73,7 +88,27 @@ techstack https://github.com/django/django --audio
 
 # Full analysis with explainer video
 techstack https://github.com/torvalds/linux --video
+
+# Explainer video with Ollama-enhanced scripts
+techstack https://github.com/tiangolo/fastapi --video --use-ollama
+
+# Use a specific Ollama model or remote host
+OLLAMA_HOST=http://gpu-box:11434 techstack https://github.com/tiangolo/fastapi --video --use-ollama --ollama-model mistral
 ```
+
+---
+
+## AI-Enhanced Scripts with Ollama (Free & Local)
+
+Pass `--use-ollama` to have a locally-running [Ollama](https://ollama.com) model rewrite each narration section into more engaging, conversational prose — like a knowledgeable friend explaining the project.
+
+1. **Install Ollama**: https://ollama.com/download
+2. **Pull a model**: `ollama pull llama3` (or `mistral`, `phi3`, etc.)
+3. **Run the analyzer**: `techstack <URL> --video --use-ollama`
+
+If Ollama is not installed or not running, the tool falls back to its built-in template narration automatically with a single clean log line.
+
+The `OLLAMA_HOST` environment variable can be set to a non-default endpoint (e.g. Docker containers or remote GPU servers).
 
 ---
 
@@ -107,6 +142,7 @@ fastapi/
 | Variable | Description |
 |---|---|
 | `GITHUB_TOKEN` | GitHub personal access token (alternative to `-t`) |
+| `OLLAMA_HOST` | Ollama base URL (default: `http://localhost:11434`) |
 
 ---
 
@@ -116,11 +152,12 @@ fastapi/
 techstack/
   cli.py                    ← argparse CLI entry point  (`techstack` command)
   detector.py               ← GitHub API scanning & pattern matching
-  script_generator.py       ← Natural-language narration script
+  script_generator.py       ← Natural-language narration script (+ Ollama enhancement)
   tts.py                    ← Text-to-speech (edge-tts / gTTS)
-  image_gatherer.py         ← Logo fetching (Clearbit / Wikimedia / placeholder)
-  video_generator.py        ← moviepy slide assembly & export
+  image_gatherer.py         ← Logo fetching (Devicon / SimpleIcons / Clearbit / placeholder)
+  video_generator.py        ← PIL slide renderer + moviepy ultrafast export
   reporter.py               ← Rich terminal table + JSON report
+  utils.py                  ← Shared font & slugify helpers
 analyze.py                  ← legacy shim (delegates to techstack.cli)
 pyproject.toml              ← pip-installable package config
 requirements.txt            ← raw dependency list

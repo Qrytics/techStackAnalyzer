@@ -14,6 +14,7 @@ Examples:
     techstack https://github.com/vercel/next.js -t ghp_xxx
     techstack https://github.com/django/django --audio
     techstack https://github.com/torvalds/linux --video
+    techstack https://github.com/tiangolo/fastapi --video --use-ollama
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ Examples:
   techstack https://github.com/vercel/next.js -t ghp_xxxxxxxxxxxx
   techstack https://github.com/django/django --audio
   techstack https://github.com/torvalds/linux --video
+  techstack https://github.com/tiangolo/fastapi --video --use-ollama
         """,
     )
 
@@ -133,6 +135,21 @@ Examples:
         help="edge-tts voice (default: en-US-AriaNeural). "
              "Run `edge-tts --list-voices` to browse options.",
     )
+    parser.add_argument(
+        "--use-ollama",
+        action="store_true",
+        default=False,
+        help="Use a locally-running Ollama model to enhance the generated scripts. "
+             "Requires Ollama to be installed and running (https://ollama.com). "
+             "Falls back to template text if Ollama is unavailable.",
+    )
+    parser.add_argument(
+        "--ollama-model",
+        metavar="MODEL",
+        default="llama3",
+        help="Ollama model to use for script enhancement (default: llama3). "
+             "Only used when --use-ollama is set.",
+    )
 
     args = parser.parse_args()
 
@@ -151,6 +168,8 @@ Examples:
     want_audio: bool = args.audio or args.video
     want_video: bool = args.video
     voice: str = args.voice
+    use_ollama: bool = args.use_ollama
+    ollama_model: str = args.ollama_model
 
     print(f"\n🔍 Analyzing: {repo_url}\n")
 
@@ -191,7 +210,7 @@ Examples:
     print("\n── Step 3  Script Generation ────────────────────────────────")
     from techstack.script_generator import generate
 
-    sections = generate(stack)
+    sections = generate(stack, use_ollama=use_ollama, ollama_model=ollama_model)
     for s in sections:
         print(f"   • {s['title']} ({len(s['text'].split())} words)")
 
