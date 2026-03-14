@@ -31,7 +31,18 @@ pip install .
 ## Usage
 
 ```
-techstack <REPO_URL> [options]
+techstack [REPO_URL] [options]
+```
+
+`REPO_URL` is **optional**. When omitted, `techstack` reads the `origin` remote of
+the git repository in the current directory and derives the GitHub URL automatically.
+This works for both HTTPS remotes (`https://github.com/user/repo`) and SSH remotes
+(`git@github.com:user/repo.git`).
+
+```bash
+# cd into any local GitHub clone and just run:
+cd ~/projects/my-app   # a git clone of a GitHub repo
+techstack
 ```
 
 ### Options
@@ -47,7 +58,11 @@ techstack <REPO_URL> [options]
 ### Examples
 
 ```bash
-# Instant text analysis (default — fastest)
+# Auto-detect from local git clone (no URL needed)
+cd ~/projects/my-app
+techstack
+
+# Explicit URL — instant text analysis (default — fastest)
 techstack https://github.com/tiangolo/fastapi
 
 # With a GitHub token to avoid rate limits
