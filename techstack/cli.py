@@ -3,9 +3,13 @@
 techstack CLI entry point.
 
 Usage:
-    techstack <github-repo-url> [options]
+    techstack [REPO_URL] [options]
+
+When run inside a local git clone the REPO_URL argument is optional —
+techstack will read the 'origin' remote and derive the GitHub URL automatically.
 
 Examples:
+    techstack                                          # inside a git clone
     techstack https://github.com/tiangolo/fastapi
     techstack https://github.com/vercel/next.js -t ghp_xxx
     techstack https://github.com/django/django --audio
@@ -17,6 +21,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,13 +39,51 @@ def _build_output_dir(repo_url: str, base: str = ".") -> Path:
     return out
 
 
+def _get_github_url_from_git_remote() -> str | None:
+    """Return a GitHub HTTPS URL derived from the local git 'origin' remote.
+
+    Returns *None* if the current directory is not inside a git repository or
+    the remote URL does not point to GitHub.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+
+    # SSH format: git@github.com:user/repo.git  →  https://github.com/user/repo
+    ssh_match = re.match(r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", raw)
+    if ssh_match:
+        return f"https://github.com/{ssh_match.group(1)}"
+
+    # HTTPS format: https://github.com/user/repo(.git)
+    https_match = re.match(r"(https://github\.com/[^/]+/[^/]+?)(?:\.git)?/?$", raw)
+    if https_match:
+        return https_match.group(1)
+
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="techstack",
-        description="Tech Stack Analyzer — analyze any public GitHub repo and display its tech stack.",
+        description=(
+            "Tech Stack Analyzer — analyze any public GitHub repo and display its tech stack.\n\n"
+            "When run inside a local git clone the REPO_URL argument is optional;\n"
+            "techstack will read the 'origin' remote automatically."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  techstack                                        # inside a git clone — URL auto-detected
   techstack https://github.com/tiangolo/fastapi
   techstack https://github.com/vercel/next.js -t ghp_xxxxxxxxxxxx
   techstack https://github.com/django/django --audio
@@ -51,7 +94,12 @@ Examples:
     parser.add_argument(
         "repo_url",
         metavar="REPO_URL",
-        help="Full GitHub repository URL (e.g. https://github.com/user/repo)",
+        nargs="?",
+        default=None,
+        help=(
+            "Full GitHub repository URL (e.g. https://github.com/user/repo). "
+            "If omitted, the URL is read from the 'origin' remote of the current git repository."
+        ),
     )
     parser.add_argument(
         "--token", "-t",
@@ -88,7 +136,16 @@ Examples:
 
     args = parser.parse_args()
 
-    repo_url: str = args.repo_url
+    repo_url: str | None = args.repo_url
+    if repo_url is None:
+        repo_url = _get_github_url_from_git_remote()
+        if repo_url is None:
+            parser.error(
+                "REPO_URL was not provided and could not be detected from a git remote.\n"
+                "Either supply a URL explicitly or run techstack from inside a GitHub repository clone."
+            )
+        print(f"ℹ️  Using remote origin URL: {repo_url}")
+
     github_token: str | None = args.token or os.environ.get("GITHUB_TOKEN")
     output_base: str = args.output
     want_audio: bool = args.audio or args.video
